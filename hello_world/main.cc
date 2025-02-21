@@ -37,6 +37,14 @@ seastar::future<int> slow_accum(int n) {
   co_return sum;
 }
 
+seastar::future<> lambda_coroutine_wrapper() {
+  co_await seastar::sleep(std::chrono::nanoseconds(1)).then(seastar::coroutine::lambda([]() -> seastar::future<> {
+    co_await seastar::coroutine::maybe_yield();
+    cout << "Hello from lambda coroutine\n";
+    co_return;
+  }));
+}
+
 seastar::future<> f() {
   auto fast_val = fast().then([](int val) {
     cout << "fast done, val=" << val << endl;
@@ -52,7 +60,8 @@ seastar::future<> f() {
 
   return when_all(std::move(fast_val),
                   std::move(slow_val),
-                  std::move(slow_sum)).discard_result(); // convert to future<>
+                  std::move(slow_sum),
+                  lambda_coroutine_wrapper()).discard_result(); // convert to future<>
 }
 
 int main(int argc, char* argv[]) {
