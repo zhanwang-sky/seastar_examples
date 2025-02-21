@@ -10,8 +10,11 @@
 #include <iostream>
 
 #include <seastar/core/app-template.hh>
+#include <seastar/core/coroutine.hh>
 #include <seastar/core/future.hh>
 #include <seastar/core/sleep.hh>
+#include <seastar/core/when_all.hh>
+#include <seastar/coroutine/maybe_yield.hh>
 
 using std::cout;
 using std::cerr;
@@ -25,10 +28,31 @@ seastar::future<int> fast() {
   return seastar::make_ready_future<int>(0);
 }
 
+seastar::future<int> slow_accum(int n) {
+  int sum = 0;
+  for (int i = 1; i <= n; ++i) {
+    sum += i;
+    co_await seastar::coroutine::maybe_yield();
+  }
+  co_return sum;
+}
+
 seastar::future<> f() {
-  return fast().then([](int val) {
-    cout << "fast Done, val=" << val << endl;
+  auto fast_val = fast().then([](int val) {
+    cout << "fast done, val=" << val << endl;
   });
+
+  auto slow_val = slow().then([](int val) {
+    cout << "slow done, val=" << val << endl;
+  });
+
+  auto slow_sum = slow_accum(100).then([](int sum) {
+    cout << "slow_accum(100) done, sum=" << sum << endl;
+  });
+
+  return when_all(std::move(fast_val),
+                  std::move(slow_val),
+                  std::move(slow_sum)).discard_result(); // convert to future<>
 }
 
 int main(int argc, char* argv[]) {
