@@ -45,23 +45,33 @@ seastar::future<> lambda_coroutine_wrapper() {
   }));
 }
 
+seastar::future<> pass() {
+  cout << "will pass\n";
+  return seastar::make_ready_future<>();
+}
+
+seastar::future<> fail() {
+  cout << "will fail\n";
+  return seastar::make_exception_future<>(std::runtime_error("fail"));
+}
+
+seastar::future<> fail_throw() {
+  cout << "will throw\n";
+  throw std::runtime_error("fail_throw");
+}
+
 seastar::future<> f() {
-  auto fast_val = fast().then([](int val) {
-    cout << "fast done, val=" << val << endl;
+  return fail_throw().then([] {
+    cout << "fail_throw done? invoke fail()\n";
+    return fail();
+  }).then([] {
+    cout << "fail done? invoke pass()\n";
+    return pass();
+  }).then([] {
+    cout << "passed\n";
+  }).finally([] {
+    cout << "finally get here\n";
   });
-
-  auto slow_val = slow().then([](int val) {
-    cout << "slow done, val=" << val << endl;
-  });
-
-  auto slow_sum = slow_accum(100).then([](int sum) {
-    cout << "slow_accum(100) done, sum=" << sum << endl;
-  });
-
-  return when_all(std::move(fast_val),
-                  std::move(slow_val),
-                  std::move(slow_sum),
-                  lambda_coroutine_wrapper()).discard_result(); // convert to future<>
 }
 
 int main(int argc, char* argv[]) {
