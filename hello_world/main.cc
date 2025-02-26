@@ -20,6 +20,78 @@ using std::cout;
 using std::cerr;
 using std::endl;
 
+class MyClass {
+ public:
+  MyClass() {
+    cout << "construct: " << this << endl;
+  }
+
+  MyClass(const MyClass& orig) {
+    cout << "copy construct: " << this << " = " << &orig << endl;
+  }
+
+  MyClass(MyClass&& orig) noexcept {
+    cout << "move construct: " << this << " <= " << &orig << endl;
+  }
+
+  MyClass(const MyClass&& orig) {
+    cout << "FAKE construct: " << this << " X= " << &orig << endl;
+  }
+
+  MyClass& operator=(const MyClass& orig) {
+    cout << "copy assign: " << this << " = " << &orig << endl;
+    return *this;
+  }
+
+  MyClass& operator=(MyClass&& orig) noexcept {
+    cout << "move assign: " << this << " <= " << &orig << endl;
+    return *this;
+  }
+
+  virtual ~MyClass() {
+    cout << "destruct: " << this << endl;
+  }
+
+  void operator()() && {
+    cout << "call on rvalue: " << this << endl;
+  }
+
+  void operator()() const& {
+    cout << "call on lvalue: " << this << endl;
+  }
+
+  void operator()() const&& {
+    cout << "call on CONST rvalue: " << this << endl;
+  }
+};
+
+// Lifetime management
+
+namespace lifetime_management {
+
+using namespace std::chrono_literals;
+using namespace seastar;
+
+template <typename T>
+future<> slow_op(T& op) {
+  cout << "slow_op: Scheduling op(" << &op << ") in 1 second\n";
+
+  return sleep(1s).then([&op]() {
+    cout << "slow_op: Executing op(" << &op << ") on lvalue:\n";
+    op();
+  }).then([&op]() {
+    cout << "slow_op: Executing op(" << &op << ") on rvalue:\n";
+    std::move(op)();
+  });
+}
+
+future<> f() {
+  return when_all(do_with(MyClass(), [](auto& op) { return slow_op(op); }),
+                  do_with(MyClass(), slow_op<MyClass>)).discard_result();
+}
+
+}
+
 seastar::future<int> slow() {
   return seastar::sleep(std::chrono::seconds(3)).then([] { return 3; });
 }
@@ -78,7 +150,7 @@ int main(int argc, char* argv[]) {
   seastar::app_template app;
 
   try {
-    app.run(argc, argv, f);
+    app.run(argc, argv, lifetime_management::f);
   } catch (...) {
     cerr << "Exception caught: " << std::current_exception() << endl;
     return 1;
