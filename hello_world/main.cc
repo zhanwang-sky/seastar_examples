@@ -12,6 +12,7 @@
 #include <seastar/core/app-template.hh>
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/future.hh>
+#include <seastar/core/shared_ptr.hh>
 #include <seastar/core/sleep.hh>
 #include <seastar/core/when_all.hh>
 #include <seastar/coroutine/maybe_yield.hh>
@@ -86,8 +87,16 @@ future<> slow_op(T& op) {
 }
 
 future<> f() {
-  return when_all(do_with(MyClass(), [](auto& op) { return slow_op(op); }),
-                  do_with(MyClass(), slow_op<MyClass>)).discard_result();
+  auto task_1_done = make_lw_shared<bool>(false);
+  return when_all(
+    do_with(MyClass(), [task_1_done](auto& op) {
+              *task_1_done = true;
+              return slow_op(op);
+            }),
+    do_with(MyClass(), slow_op<MyClass>)
+  ).discard_result().then([task_1_done]() {
+    cout << "all done, task_1_done=" << *task_1_done << endl;
+  });
 }
 
 }
