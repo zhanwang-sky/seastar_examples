@@ -99,7 +99,68 @@ future<> f() {
   });
 }
 
+} // lifetime_management
+
+// Coroutines
+
+namespace coroutines {
+
+using namespace std::chrono_literals;
+using namespace seastar;
+
+future<int> slow_accum(int n) {
+  // sanity check
+  if (n < 0) {
+    // This may impact performance, not recommended.
+    // throw std::invalid_argument("call sloc_accum with negative value");
+    co_return coroutine::exception(std::make_exception_ptr(std::invalid_argument("call sloc_accum with negative value")));
+  }
+
+  int sum = 0;
+  for (int i = 0; i <= n; ++i) {
+    sum += i;
+    co_await coroutine::maybe_yield();
+  }
+  co_return sum;
 }
+
+future<> f() {
+  MyClass obj;
+
+  try {
+    int sum;
+
+    cout << "accumulate from 1 to 100...\n";
+    sum = co_await slow_accum(100);
+    cout << "sum=" << sum << endl;
+
+    cout << "accumulate -1?\n";
+    // do not yield
+    sum = co_await coroutine::without_preemption_check(slow_accum(-1));
+    cout << "sum=" << sum << endl;
+
+  } catch (...) {
+    cerr << "exception caught: " << std::current_exception() << endl;
+  }
+
+  // Notes:
+  // seastar::future::then() accepts a continuation
+  // We wrap the argument to seastar::future::then() with seastar::coroutine::lambda()
+  // We ensure evaluation of the lambda completes within the same expression using the outer co_await.
+  cout << "scheduling a lambda coroutine with obj " << &obj << " in 1s\n";
+  co_await sleep(1s).then(coroutine::lambda([&obj]() -> future<> { // with outer co_await, we can safely capture obj by reference
+    cout << "in lambda coroutine, scheduling slow_op on obj " << &obj << " in 500ms\n";
+    co_await sleep(1s); // make lambda a coroutine, should be enclosed by coroutine::lambda()
+    obj();
+  }));
+
+  // check
+  co_await sleep(1s).then([&obj]() {
+    cout << "at this point, obj " << &obj << " is still available\n";
+  });
+}
+
+} // coroutines
 
 seastar::future<int> slow() {
   return seastar::sleep(std::chrono::seconds(3)).then([] { return 3; });
@@ -107,23 +168,6 @@ seastar::future<int> slow() {
 
 seastar::future<int> fast() {
   return seastar::make_ready_future<int>(0);
-}
-
-seastar::future<int> slow_accum(int n) {
-  int sum = 0;
-  for (int i = 1; i <= n; ++i) {
-    sum += i;
-    co_await seastar::coroutine::maybe_yield();
-  }
-  co_return sum;
-}
-
-seastar::future<> lambda_coroutine_wrapper() {
-  co_await seastar::sleep(std::chrono::nanoseconds(1)).then(seastar::coroutine::lambda([]() -> seastar::future<> {
-    co_await seastar::coroutine::maybe_yield();
-    cout << "Hello from lambda coroutine\n";
-    co_return;
-  }));
 }
 
 seastar::future<> pass() {
@@ -159,7 +203,7 @@ int main(int argc, char* argv[]) {
   seastar::app_template app;
 
   try {
-    app.run(argc, argv, lifetime_management::f);
+    app.run(argc, argv, coroutines::f);
   } catch (...) {
     cerr << "Exception caught: " << std::current_exception() << endl;
     return 1;
