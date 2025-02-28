@@ -12,10 +12,14 @@
 #include <seastar/core/app-template.hh>
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/future.hh>
+#include <seastar/core/loop.hh>
+#include <seastar/core/shard_id.hh>
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/core/sleep.hh>
+#include <seastar/core/smp.hh>
 #include <seastar/core/when_all.hh>
 #include <seastar/coroutine/maybe_yield.hh>
+#include <seastar/util/log.hh>
 
 using std::cout;
 using std::cerr;
@@ -162,6 +166,28 @@ future<> f() {
 
 } // coroutines
 
+// Network stack
+
+namespace network {
+
+using namespace seastar;
+
+logger log("network");
+
+future<> service_loop() {
+  log.info("Hello from core {}", this_shard_id());
+  return make_ready_future<>();
+}
+
+future<> f() {
+  return parallel_for_each(std::views::iota(0u, smp::count),
+                           [](unsigned c) {
+                             return smp::submit_to(c, service_loop);
+                           });
+}
+
+} // network
+
 seastar::future<int> slow() {
   return seastar::sleep(std::chrono::seconds(3)).then([] { return 3; });
 }
@@ -203,7 +229,7 @@ int main(int argc, char* argv[]) {
   seastar::app_template app;
 
   try {
-    app.run(argc, argv, coroutines::f);
+    app.run(argc, argv, network::f);
   } catch (...) {
     cerr << "Exception caught: " << std::current_exception() << endl;
     return 1;
