@@ -13,12 +13,14 @@
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/future.hh>
 #include <seastar/core/loop.hh>
+#include <seastar/core/seastar.hh>
 #include <seastar/core/shard_id.hh>
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/core/sleep.hh>
 #include <seastar/core/smp.hh>
 #include <seastar/core/when_all.hh>
 #include <seastar/coroutine/maybe_yield.hh>
+#include <seastar/net/api.hh>
 #include <seastar/util/log.hh>
 
 using std::cout;
@@ -171,19 +173,32 @@ future<> f() {
 namespace network {
 
 using namespace seastar;
+using namespace std::chrono_literals;
 
 logger log("network");
 
+future<> do_echo(accept_result&& res) {
+  log.info("do nothing with res");
+  co_return;
+}
+
 future<> service_loop() {
-  log.info("Hello from core {}", this_shard_id());
-  return make_ready_future<>();
+  listen_options opts = {
+    .reuse_address = true,
+    .lba = server_socket::load_balancing_algorithm::port
+  };
+  auto sock = listen(seastar::make_ipv4_address({8880}), opts);
+  log.info("Listening on {} ...", sock.local_address());
+  while (true) {
+    auto res = co_await sock.accept();
+    log.info("Accepted connection from {}", res.remote_address);
+    (void) do_echo(std::move(res));
+  }
 }
 
 future<> f() {
   return parallel_for_each(std::views::iota(0u, smp::count),
-                           [](unsigned c) {
-                             return smp::submit_to(c, service_loop);
-                           });
+                           [](unsigned c) { return smp::submit_to(c, service_loop); });
 }
 
 } // network
