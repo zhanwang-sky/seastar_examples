@@ -15,6 +15,7 @@
 #include <seastar/core/loop.hh>
 #include <seastar/core/seastar.hh>
 #include <seastar/core/shard_id.hh>
+#include <seastar/core/sharded.hh>
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/core/sleep.hh>
 #include <seastar/core/smp.hh>
@@ -29,46 +30,46 @@ using std::endl;
 
 class MyClass {
  public:
-  MyClass() {
-    cout << "construct: " << this << endl;
+  MyClass(const void* arg = nullptr) {
+    printf("[shard %u] MyClass - construct: %p with {%p}\n", seastar::this_shard_id(), this, arg);
   }
 
   MyClass(const MyClass& orig) {
-    cout << "copy construct: " << this << " = " << &orig << endl;
+    printf("[shard %u] MyClass - copy construct: %p = %p\n", seastar::this_shard_id(), this, &orig);
   }
 
-  MyClass(MyClass&& orig) noexcept {
-    cout << "move construct: " << this << " <= " << &orig << endl;
+  MyClass(MyClass&& orig) {
+    printf("[shard %u] MyClass - move construct: %p <= %p\n", seastar::this_shard_id(), this, &orig);
   }
 
   MyClass(const MyClass&& orig) {
-    cout << "FAKE construct: " << this << " X= " << &orig << endl;
+    printf("[shard %u] MyClass - FAKE construct: %p X= %p\n", seastar::this_shard_id(), this, &orig);
   }
 
-  MyClass& operator=(const MyClass& orig) {
-    cout << "copy assign: " << this << " = " << &orig << endl;
+  MyClass& operator=(const MyClass& rhs) noexcept {
+    printf("[shard %u] MyClass - copy asign: %p = %p\n", seastar::this_shard_id(), this, &rhs);
     return *this;
   }
 
-  MyClass& operator=(MyClass&& orig) noexcept {
-    cout << "move assign: " << this << " <= " << &orig << endl;
+  MyClass& operator=(MyClass&& rhs) noexcept {
+    printf("[shard %u] MyClass - move asign: %p <= %p\n", seastar::this_shard_id(), this, &rhs);
     return *this;
   }
 
   virtual ~MyClass() {
-    cout << "destruct: " << this << endl;
+    printf("[shard %u] MyClass - destruct: %p\n", seastar::this_shard_id(), this);
   }
 
   void operator()() && {
-    cout << "call on rvalue: " << this << endl;
+    printf("[shard %u] MyClass - call on rvalue: %p\n", seastar::this_shard_id(), this);
   }
 
   void operator()() const& {
-    cout << "call on lvalue: " << this << endl;
+    printf("[shard %u] MyClass - call on const lvalue: %p\n", seastar::this_shard_id(), this);
   }
 
   void operator()() const&& {
-    cout << "call on CONST rvalue: " << this << endl;
+    printf("[shard %u] MyClass - call on CONST rvalue: %p\n", seastar::this_shard_id(), this);
   }
 };
 
@@ -217,6 +218,38 @@ future<> f() {
 
 } // network
 
+namespace sharded_services {
+
+using namespace seastar;
+
+struct MyService : public MyClass {
+  MyService(const MyClass& obj) : MyClass(&obj) { }
+
+  virtual ~MyService() { }
+
+  future<> run() {
+    (*this)();
+    return make_ready_future<>();
+  }
+
+  future<> stop() {
+    return make_ready_future<>();
+  }
+};
+
+future<> f() {
+  sharded<MyService> s;
+  co_await s.start(MyClass()).then([&s]() { // MyClass copy many many times...
+    return s.invoke_on(1u, [](MyService& service) {
+      return service.run();
+    });
+  }).then([&s]() {
+    return s.stop();
+  });
+}
+
+} // sharded_services
+
 seastar::future<int> slow() {
   return seastar::sleep(std::chrono::seconds(3)).then([] { return 3; });
 }
@@ -258,7 +291,7 @@ int main(int argc, char* argv[]) {
   seastar::app_template app;
 
   try {
-    app.run(argc, argv, network::f);
+    app.run(argc, argv, sharded_services::f);
   } catch (...) {
     cerr << "Exception caught: " << std::current_exception() << endl;
     return 1;
