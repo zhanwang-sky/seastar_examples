@@ -178,8 +178,22 @@ using namespace std::chrono_literals;
 logger log("network");
 
 future<> do_echo(accept_result&& res) {
-  log.info("do nothing with res");
-  co_return;
+  auto& s = res.connection;
+  auto in = s.input();
+  auto out = s.output();
+  size_t bytes_transferred = 0;
+
+  while (true) {
+    auto tmp_buf = co_await in.read();
+    if (!tmp_buf) {
+      log.info("{} disconnected, {} bytes transferred",
+               res.remote_address, bytes_transferred);
+      co_return;
+    }
+    bytes_transferred += tmp_buf.size();
+    co_await out.write(std::move(tmp_buf));
+    co_await out.flush();
+  }
 }
 
 future<> service_loop() {
@@ -192,7 +206,7 @@ future<> service_loop() {
   while (true) {
     auto res = co_await sock.accept();
     log.info("Accepted connection from {}", res.remote_address);
-    (void) do_echo(std::move(res));
+    static_cast<void>(do_echo(std::move(res)));
   }
 }
 
