@@ -173,8 +173,8 @@ future<> f() {
 
 namespace network {
 
-using namespace seastar;
 using namespace std::chrono_literals;
+using namespace seastar;
 
 logger log("network");
 
