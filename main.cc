@@ -125,8 +125,40 @@ seastar::future<> exceptional_futures() {
   });
 }
 
+seastar::future<> throwing_exceptions() {
+  // 会抛出异常的函数
+  auto sanity_check = [](int arg) -> int {
+    if (!arg) {
+      throw std::invalid_argument("INVALID ARGUMENT '0'!");
+    }
+    return arg;
+  };
+
+  // 将可能抛异常的函数放在futurize_invoke()中执行，会将异常封装成exception_future
+  auto maybe_exceptional = seastar::futurize_invoke(sanity_check, 0).then_wrapped([](seastar::future<int> f) {
+    if (f.failed()) {
+      logger.warn("throwing_exceptions: sanity check failed, throw runtime_error!");
+      f.ignore_ready_future();
+      // 在延续中抛异常，也会被封装成exception_future
+      throw std::runtime_error("sanity check failed");
+    }
+    auto val = f.get();
+    logger.info("throwing_exceptions: sanity check passed, got {}", val);
+    return val;
+  }).finally([] {
+    logger.info("throwing_exceptions: finally, do some cleanup...");
+  });
+
+  // discard_result()丢弃了future的类型，handle_exception()的回调函数直接返回void即可
+  return maybe_exceptional.discard_result().handle_exception([](std::exception_ptr ep) {
+    logger.warn("throwing_exceptions: got exception {}", ep);
+  });
+}
+
 seastar::future<> introduce_future() {
-  auto ret = seastar::when_all(futures_n_continuations(), exceptional_futures());
+  auto ret = seastar::when_all(futures_n_continuations(),
+                               exceptional_futures(),
+                               throwing_exceptions());
   return ret.discard_result().then([] { logger.info("all done"); });
 }
 
