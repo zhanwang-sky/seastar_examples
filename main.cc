@@ -100,12 +100,19 @@ seastar::future<> exceptional_futures() {
   });
   // fail_later_3 has the same type as fail_later_2
 
-  // 捕获并消费异常
-  auto fail_later_4 = fail_later_3.handle_exception([](std::exception_ptr ep) {
-    logger.warn("fail_later_3 has exception {}, handle it", ep);
-    return std::string("exception handled");
+  // 使用then_wrapped()捕获可能包含异常的future
+  auto fail_later_4 = fail_later_3.then_wrapped([](seastar::future<std::string> fut) {
+    // 此处拿到的future肯定是ready的
+    if (fut.failed()) {
+      logger.warn("fail_later_3 has failed");
+      fut.ignore_ready_future(); // 消费异常状态，否则会报错
+      return "exception handled";
+    }
+    auto msg = fut.get();
+    logger.info("fail_later_3 has value {}", msg);
+    return "future consumed";
   });
-  // fail_later_4 has the same type as fail_later_3 and fail_later_2
+  // fail_later_4 has type future<const char*>
 
   // 可以在最后用finally()安装一个延续，无论是否抛异常都会调用（但它不会消费异常结果）
   auto fail_finally = fail_later_4.finally([] {
@@ -113,7 +120,7 @@ seastar::future<> exceptional_futures() {
   });
   // fail_finally has the same type as fail_later_4
 
-  return fail_finally.then([](const std::string& msg) {
+  return fail_finally.then([](const char* msg) {
     logger.info("finally, we got \"{}\"", msg);
   });
 }
