@@ -1,11 +1,11 @@
 //
-//  main.cc
+//  futures.cc
 //  seastar_examples
 //
 //  Created by zhanwang-sky on 2025/3/21.
 //
 
-// c++ main.cc $(pkg-config --libs --cflags --static seastar)
+// c++ futures.cc $(pkg-config --libs --cflags --static seastar)
 
 #include <cstdio>
 #include <chrono>
@@ -21,7 +21,7 @@
 
 using namespace std::chrono_literals;
 
-seastar::logger logger("examples");
+seastar::logger logger("futures");
 
 seastar::future<> futures_n_continuations() {
   // future的状态
@@ -161,6 +161,16 @@ seastar::future<> introduce_future() {
                                throwing_exceptions());
   return ret.discard_result().then([] { logger.info("all done"); });
 }
+
+// XXX TODO: Lifetime management
+
+// XXX TODO: Coroutines
+
+// XXX TODO: Preemption and Task Quota
+
+// XXX TODO: Loops, Semaphores, Pipes, Gate
+
+// XXX TODO: lw_shared_ptr, sstring
 
 int main(int argc, char* argv[]) {
   seastar::app_template app;
