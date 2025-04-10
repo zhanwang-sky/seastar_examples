@@ -10,46 +10,49 @@
 #include <seastar/core/app-template.hh>
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/future.hh>
-#include <seastar/core/reactor.hh>
+#include <seastar/core/seastar.hh>
 #include <seastar/core/when_all.hh>
 #include <seastar/net/api.hh>
 #include <seastar/util/log.hh>
 
 seastar::logger logger("network");
 
-seastar::future<> do_echo(seastar::connected_socket&& conn) {
-  auto remote_addr = conn.remote_address();
-  auto in = conn.input();
-  auto out = conn.output();
-  size_t bytes = 0;
-
-  logger.info("client {} connected", remote_addr);
-
-  for (;;) {
-    auto buf = co_await in.read();
-    if (!buf) {
-      break;
-    }
-    bytes += buf.size();
-    co_await out.write(std::move(buf));
-    co_await out.flush();
-  }
-
-  logger.info("client {} disconnected, {} bytes transferred", remote_addr, bytes);
-}
-
 seastar::future<> tcp_server(uint16_t port) {
   seastar::listen_options lo;
   lo.reuse_address = true;
-  auto listener = seastar::listen(seastar::make_ipv4_address({port}), lo);
+
+  auto sock = seastar::listen(seastar::make_ipv4_address({port}), lo);
+
+  auto do_echo = [](seastar::connected_socket&& conn) -> seastar::future<> {
+    auto in = conn.input();
+    auto out = conn.output();
+    for (;;) {
+      auto buf = co_await in.read();
+      if (!buf) {
+        break;
+      }
+      co_await out.write(std::move(buf));
+      co_await out.flush();
+    }
+  };
+
   for (;;) {
-    auto res = co_await listener.accept();
+    auto res = co_await sock.accept();
     (void) do_echo(std::move(res.connection));
   }
 }
 
+seastar::future<> udp_server(uint16_t port) {
+  auto chan = seastar::make_bound_datagram_channel(seastar::make_ipv4_address({port}));
+
+  for (;;) {
+    auto dgram = co_await chan.receive();
+    co_await chan.send(dgram.get_src(), std::move(dgram.get_data()));
+  }
+}
+
 seastar::future<> introduce_network_stack() {
-  return seastar::when_all(tcp_server(1234)).discard_result();
+  return seastar::when_all(tcp_server(1234), udp_server(1234)).discard_result();
 }
 
 int main(int argc, char* argv[]) {
